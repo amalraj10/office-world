@@ -800,7 +800,14 @@ export class OfficeScene extends Phaser.Scene {
       padding: { x: 6, y: 2 },
     }).setOrigin(0.5);
 
-    this.player.add([shadow, ...parts, nameBadge]);
+    // Render Equipped Pistol Gun Sprite onto Player
+    const gunContainer = this.add.container(12, 0);
+    const gunBody = this.add.rectangle(0, 0, 10, 5, 0x1e293b);
+    const gunBarrel = this.add.rectangle(6, -1, 7, 3, 0x475569);
+    const gunGrip = this.add.rectangle(-2, 3, 3, 5, 0x0f172a);
+    gunContainer.add([gunGrip, gunBody, gunBarrel]);
+
+    this.player.add([shadow, ...parts, gunContainer, nameBadge]);
   }
 
   public updatePlayerCharacter(config: CharacterConfig) {
