@@ -135,12 +135,17 @@ export class OfficeScene extends Phaser.Scene {
       this.switchWeaponKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     }
 
-    // Pointer Pointer Down -> Fire Pistol or Knife
+    // Pointer & Keyboard Down -> Fire Pistol or Knife
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.leftButtonDown()) {
-        this.fireActiveWeapon();
-      }
+      this.fireActiveWeapon(pointer);
     });
+
+    if (this.input.keyboard) {
+      const spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      spaceKey.on('down', () => {
+        this.fireActiveWeapon();
+      });
+    }
 
     // Camera
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
@@ -1114,10 +1119,10 @@ export class OfficeScene extends Phaser.Scene {
   // ----------------------------------------------------
   // COMBAT & RICOCHET SHOOTER METHODS
   // ----------------------------------------------------
-  public fireActiveWeapon() {
+  public fireActiveWeapon(inputPointer?: Phaser.Input.Pointer) {
     const now = this.time.now;
     if (this.currentWeapon === 'pistol') {
-      if (now - this.lastFiredTime < 220) return; // Fire rate limit
+      if (now - this.lastFiredTime < 180) return; // Fast responsive fire rate
       if (this.ammo <= 0) {
         this.reloadPistol();
         return;
@@ -1126,7 +1131,7 @@ export class OfficeScene extends Phaser.Scene {
       this.ammo -= 1;
 
       // Pointer angle calculation
-      const pointer = this.input.activePointer;
+      const pointer = inputPointer || this.input.activePointer;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
 
