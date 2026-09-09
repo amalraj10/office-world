@@ -1122,7 +1122,7 @@ export class OfficeScene extends Phaser.Scene {
   public fireActiveWeapon(inputPointer?: Phaser.Input.Pointer) {
     const now = this.time.now;
     if (this.currentWeapon === 'pistol') {
-      if (now - this.lastFiredTime < 180) return; // Fast responsive fire rate
+      if (now - this.lastFiredTime < 150) return;
       if (this.ammo <= 0) {
         this.reloadPistol();
         return;
@@ -1135,36 +1135,33 @@ export class OfficeScene extends Phaser.Scene {
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
 
-      // Create Bullet Graphic
-      const bulletGraphics = this.add.graphics();
-      bulletGraphics.fillStyle(0xfacc15, 1); // Laser yellow core
-      bulletGraphics.fillCircle(0, 0, 4);
-      bulletGraphics.lineStyle(1.5, 0xef4444, 0.9); // Red energy aura outline
-      bulletGraphics.strokeCircle(0, 0, 5);
+      // Create Visible Bullet Physics Circle
+      const bullet = this.add.circle(this.player.x, this.player.y, 6, 0xfacc15);
+      bullet.setStrokeStyle(2, 0xef4444);
+      bullet.setDepth(100);
 
-      const bulletContainer = this.add.container(this.player.x, this.player.y, [bulletGraphics]);
-      this.physics.world.enable(bulletContainer);
-      const body = bulletContainer.body as Phaser.Physics.Arcade.Body;
-      body.setCircle(5);
-      body.setBounce(1, 1); // Perfect bounce reflection!
+      this.physics.world.enable(bullet);
+      const body = bullet.body as Phaser.Physics.Arcade.Body;
+      body.setCircle(6);
+      body.setBounce(1, 1);
       body.setCollideWorldBounds(true);
 
-      const speed = 550;
+      const speed = 700;
       body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
 
-      // Store ricochet bounce counter data
-      (bulletContainer as any).bounces = 0;
-      (bulletContainer as any).maxBounces = 3;
+      (bullet as any).bounces = 0;
+      (bullet as any).maxBounces = 4;
 
-      this.bulletsGroup.add(bulletContainer);
+      this.bulletsGroup.add(bullet);
 
       // Muzzle Flash Effect
       const flash = this.add.circle(
-        this.player.x + Math.cos(angle) * 20,
-        this.player.y + Math.sin(angle) * 20,
-        9,
+        this.player.x + Math.cos(angle) * 22,
+        this.player.y + Math.sin(angle) * 22,
+        12,
         0xfde047
       );
+      flash.setDepth(101);
       this.tweens.add({
         targets: flash,
         alpha: 0,
@@ -1173,18 +1170,19 @@ export class OfficeScene extends Phaser.Scene {
         onComplete: () => flash.destroy(),
       });
     } else if (this.currentWeapon === 'knife') {
-      if (now - this.lastFiredTime < 400) return;
+      if (now - this.lastFiredTime < 350) return;
       this.lastFiredTime = now;
 
-      const pointer = this.input.activePointer;
+      const pointer = inputPointer || this.input.activePointer;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
 
       // Knife Slash Arc Visual
       const knifeArc = this.add.graphics();
-      knifeArc.lineStyle(3, 0xf8fafc, 0.95);
+      knifeArc.setDepth(102);
+      knifeArc.lineStyle(4, 0xf8fafc, 0.95);
       knifeArc.beginPath();
-      knifeArc.arc(this.player.x, this.player.y, 35, angle - 0.7, angle + 0.7, false);
+      knifeArc.arc(this.player.x, this.player.y, 40, angle - 0.8, angle + 0.8, false);
       knifeArc.strokePath();
 
       this.tweens.add({
