@@ -1,7 +1,10 @@
 'use client';
 
-import { Profile, UserStatus } from '@/types';
-import { ShieldCheck, Users, Eye, Coffee, Laptop, UserX, BarChart3, Radio } from 'lucide-react';
+import { Profile } from '@/types';
+import { getCharacterConfig } from '@/lib/characterPresets';
+import { STATUS_META } from '@/lib/status';
+import CharacterAvatar from '@/components/avatar/CharacterAvatar';
+import { ShieldCheck, Eye, Coffee, Laptop, UserX } from 'lucide-react';
 
 interface ExecutiveDashboardModalProps {
   coworkers: Profile[];
@@ -15,7 +18,7 @@ export default function ExecutiveDashboardModal({
   onHighlightEmployee,
 }: ExecutiveDashboardModalProps) {
   const total = coworkers.length;
-  const working = coworkers.filter((c) => c.status === 'Working');
+  const working = coworkers.filter((c) => c.status === 'Working' || c.status === 'Available' || c.status === 'In a meeting');
   const away = coworkers.filter((c) => c.status === 'Away');
   const onBreak = coworkers.filter((c) => c.status === 'Break');
   const offline = coworkers.filter((c) => c.status === 'Offline');
@@ -109,9 +112,7 @@ export default function ExecutiveDashboardModal({
                 {coworkers.map((cw) => (
                   <tr key={cw.id} className="hover:bg-slate-900/50 transition">
                     <td className="p-3 flex items-center space-x-2.5">
-                      <div className="w-7 h-7 rounded-full bg-slate-800 font-bold text-xs flex items-center justify-center text-slate-300 border border-slate-700">
-                        {cw.display_name.charAt(0)}
-                      </div>
+                      <CharacterAvatar config={getCharacterConfig(cw.avatar, cw.character ?? null)} size={28} variant="face" />
                       <span className="font-bold text-white">{cw.display_name}</span>
                     </td>
                     <td className="p-3">
@@ -120,32 +121,21 @@ export default function ExecutiveDashboardModal({
                     </td>
                     <td className="p-3">
                       <span
-                        className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                          cw.status === 'Working'
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                            : cw.status === 'Away'
-                            ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                            : cw.status === 'Break'
-                            ? 'bg-blue-950 text-blue-400 border border-blue-800'
-                            : 'bg-slate-900 text-slate-400 border border-slate-800'
+                        className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-900 border border-slate-800 ${
+                          STATUS_META[cw.status].text
                         }`}
                       >
-                        <span>
-                          {cw.status === 'Working'
-                            ? '🟢 Working'
-                            : cw.status === 'Away'
-                            ? '🟡 Away'
-                            : cw.status === 'Break'
-                            ? '🔵 On Break'
-                            : '⚫ Offline'}
-                        </span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${STATUS_META[cw.status].dot}`} />
+                        <span>{STATUS_META[cw.status].label}</span>
                       </span>
                     </td>
                     <td className="p-3 font-mono text-[11px] text-slate-400">
-                      {cw.status === 'Working'
+                      {cw.status === 'Working' || cw.status === 'Available'
                         ? cw.desk_id ? `💻 ${cw.desk_id.toUpperCase()}` : '💻 Work Bay'
                         : cw.status === 'Break'
                         ? '☕ Pantry & Lounge'
+                        : cw.status === 'In a meeting'
+                        ? '📊 Meeting Room'
                         : cw.status === 'Away'
                         ? '🛋️ Floor Walkway'
                         : '❌ Not In Office'}

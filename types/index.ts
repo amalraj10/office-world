@@ -1,9 +1,34 @@
-export type UserStatus = 'Working' | 'Away' | 'Break' | 'Offline';
+export type UserStatus = 'Working' | 'Available' | 'Break' | 'Away' | 'Offline' | 'In a meeting';
+
+export type HairStyle =
+  | 'short-crop'
+  | 'buzz'
+  | 'spiky'
+  | 'long-curly'
+  | 'bun'
+  | 'bob-cut'
+  | 'mohawk'
+  | 'ponytail'
+  | 'bald';
+
+export type OutfitStyle = 'tshirt' | 'hoodie' | 'shirt' | 'blazer' | 'dress';
+
+export type AccessoryType = 'none' | 'glasses' | 'headphones' | 'beanie' | 'cap';
+
+export interface CharacterConfig {
+  skinTone: string;
+  hairStyle: HairStyle;
+  hairColor: string;
+  outfitStyle: OutfitStyle;
+  outfitColor: string;
+  accessory: AccessoryType;
+}
 
 export interface Profile {
   id: string;
   display_name: string;
   avatar: string;
+  character?: CharacterConfig;
   department: string;
   job_title: string;
   status: UserStatus;
@@ -60,8 +85,10 @@ export interface Snap {
   user_avatar: string;
   user_title: string;
   text: string;
+  image_emoji?: string;
   image_url?: string;
   reactions: Record<string, number>; // e.g. { '❤️': 12, '☕': 5 }
+  comments: number;
   user_reactions?: string[];
   created_at: string;
 }

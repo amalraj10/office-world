@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import { Message } from '@/types';
-import { X, Send, User } from 'lucide-react';
+import { getCharacterConfig } from '@/lib/characterPresets';
+import CharacterAvatar from '@/components/avatar/CharacterAvatar';
+import { X, Send } from 'lucide-react';
 
 interface ChatModalProps {
   recipient: {
@@ -40,9 +42,7 @@ export default function ChatModal({
       {/* Header */}
       <div className="bg-slate-950 p-3.5 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center space-x-2.5">
-          <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-300 font-bold text-xs flex items-center justify-center border border-blue-500/30">
-            {recipient.name.charAt(0)}
-          </div>
+          <CharacterAvatar config={getCharacterConfig(recipient.avatar)} size={28} variant="face" />
           <div>
             <h4 className="text-xs font-bold text-white leading-tight">{recipient.name}</h4>
             <span className="text-[10px] text-emerald-400 font-medium">💬 Proximity Chat</span>

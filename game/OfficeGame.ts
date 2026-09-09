@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
-import { OfficeScene } from './scenes/OfficeScene';
+import { OfficeScene, OfficeSceneInitData } from './scenes/OfficeScene';
 
-export function createOfficeGame(containerId: string) {
+export function createOfficeGame(containerId: string, initData?: OfficeSceneInitData) {
   const config: Phaser.Types.Core.GameConfig = {
     type: Phaser.AUTO,
     parent: containerId,
@@ -14,7 +14,6 @@ export function createOfficeGame(containerId: string) {
         debug: false,
       },
     },
-    scene: [OfficeScene],
     scale: {
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -22,5 +21,7 @@ export function createOfficeGame(containerId: string) {
     backgroundColor: '#0f172a',
   };
 
-  return new Phaser.Game(config);
+  const game = new Phaser.Game(config);
+  game.scene.add('OfficeScene', OfficeScene, true, initData as unknown as Record<string, unknown>);
+  return game;
 }
