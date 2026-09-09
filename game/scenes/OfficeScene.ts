@@ -103,6 +103,9 @@ export class OfficeScene extends Phaser.Scene {
       runChildUpdate: true,
     });
 
+    // Coworkers Physics Group for Target Shooting & Life Reduction
+    this.coworkersGroup = this.physics.add.group();
+
     // 1. Draw Architectural Floor Plan & Room Zones
     this.createFloorPlan();
 
@@ -162,6 +165,11 @@ export class OfficeScene extends Phaser.Scene {
     });
     this.physics.add.collider(this.bulletsGroup, this.desksGroup, (bulletObj) => {
       this.handleBulletRicochet(bulletObj as Phaser.Types.Physics.Arcade.GameObjectWithBody);
+    });
+
+    // Bullet Hit Enemy Coworker -> Damage HP & Die on 0 HP
+    this.physics.add.overlap(this.bulletsGroup, this.coworkersGroup, (bulletObj, coworkerObj) => {
+      this.handleBulletHitCoworker(bulletObj as any, coworkerObj as any);
     });
   }
 
@@ -745,6 +753,11 @@ export class OfficeScene extends Phaser.Scene {
     const shadow = this.add.ellipse(0, 16, 26, 10, 0x000000, 0.4);
     const parts = this.buildCharacterVisual(config, options);
 
+    // Overhead Health Bar (100 HP)
+    const hpBg = this.add.rectangle(0, -32, 36, 6, 0x0f172a);
+    const hpFill = this.add.rectangle(-17, -32, 34, 4, 0x22c55e);
+    hpFill.setOrigin(0, 0.5);
+
     const nameBadge = this.add.text(0, 24, name, {
       fontSize: '10px',
       fontStyle: 'bold',
@@ -753,10 +766,24 @@ export class OfficeScene extends Phaser.Scene {
       padding: { x: 5, y: 2 },
     }).setOrigin(0.5);
 
-    container.add([shadow, ...parts, nameBadge]);
+    container.add([shadow, ...parts, hpBg, hpFill, nameBadge]);
+
+    // Attach combat data onto coworker object
+    (container as any).hp = 100;
+    (container as any).maxHp = 100;
+    (container as any).hpFill = hpFill;
+    (container as any).coworkerName = name;
+
+    // Physics Body for Bullet Hit Collisions
+    this.physics.world.enable(container);
+    const body = container.body as Phaser.Physics.Arcade.Body;
+    body.setCircle(18, -18, -18);
+    body.setImmovable(true);
+
+    this.coworkersGroup.add(container);
 
     if (speechText) {
-      this.createSpeechBubble(x, y - 35, speechText);
+      this.createSpeechBubble(x, y - 45, speechText);
     }
   }
 
@@ -1200,6 +1227,7 @@ export class OfficeScene extends Phaser.Scene {
 
     // Ricochet Spark Particle Visual
     const spark = this.add.circle(bulletContainer.x, bulletContainer.y, 5, 0xf59e0b);
+    spark.setDepth(103);
     this.tweens.add({
       targets: spark,
       scale: 2,
@@ -1210,6 +1238,89 @@ export class OfficeScene extends Phaser.Scene {
 
     if (bulletContainer.bounces >= bulletContainer.maxBounces) {
       bulletContainer.destroy();
+    }
+  }
+
+  private handleBulletHitCoworker(bullet: any, coworker: any) {
+    if (!bullet || !bullet.active || !coworker || !coworker.active) return;
+
+    // Destroy bullet on hit
+    bullet.destroy();
+
+    // Reduce HP by 25 damage per bullet
+    const damage = 25;
+    coworker.hp = Math.max(0, (coworker.hp || 100) - damage);
+
+    // Update Overhead HP Bar
+    const hpRatio = coworker.hp / coworker.maxHp;
+    if (coworker.hpFill) {
+      coworker.hpFill.width = 34 * hpRatio;
+      if (hpRatio < 0.3) {
+        coworker.hpFill.fillColor = 0xef4444; // Red low HP
+      } else if (hpRatio < 0.6) {
+        coworker.hpFill.fillColor = 0xf59e0b; // Yellow mid HP
+      }
+    }
+
+    // Hit Impact Spark Visual & Red Flash
+    const hitSpark = this.add.circle(coworker.x, coworker.y, 14, 0xef4444, 0.8);
+    hitSpark.setDepth(104);
+    this.tweens.add({
+      targets: hitSpark,
+      scale: 2.2,
+      alpha: 0,
+      duration: 150,
+      onComplete: () => hitSpark.destroy(),
+    });
+
+    // Floating Damage Text (-25 HP!)
+    const dmgText = this.add.text(coworker.x, coworker.y - 25, `-${damage} HP`, {
+      fontSize: '13px',
+      fontStyle: 'extrabold',
+      color: '#EF4444',
+      backgroundColor: '#0F172A',
+      padding: { x: 4, y: 2 },
+    }).setOrigin(0.5);
+    dmgText.setDepth(105);
+
+    this.tweens.add({
+      targets: dmgText,
+      y: coworker.y - 50,
+      alpha: 0,
+      duration: 600,
+      onComplete: () => dmgText.destroy(),
+    });
+
+    // Check if Coworker Life Gone -> DIE / ELIMINATION!
+    if (coworker.hp <= 0) {
+      // Skull Elimination Text
+      const deathText = this.add.text(coworker.x, coworker.y - 15, `☠️ ${coworker.coworkerName} ELIMINATED!`, {
+        fontSize: '12px',
+        fontStyle: 'bold',
+        color: '#FFFFFF',
+        backgroundColor: '#DC2626',
+        padding: { x: 8, y: 4 },
+      }).setOrigin(0.5);
+      deathText.setDepth(106);
+
+      this.tweens.add({
+        targets: deathText,
+        y: coworker.y - 45,
+        alpha: 0,
+        duration: 1500,
+        onComplete: () => deathText.destroy(),
+      });
+
+      // Death Shrink & Fade Animation
+      this.tweens.add({
+        targets: coworker,
+        scaleY: 0,
+        alpha: 0,
+        duration: 400,
+        onComplete: () => {
+          coworker.destroy();
+        },
+      });
     }
   }
 
