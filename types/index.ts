@@ -1,5 +1,8 @@
 export type UserStatus = 'Working' | 'Available' | 'Break' | 'Away' | 'Offline' | 'In a meeting';
 
+export type WeaponType = 'pistol' | 'knife';
+export type TeamColor = 'red' | 'blue';
+
 export type HairStyle =
   | 'short-crop'
   | 'buzz'
@@ -33,6 +36,10 @@ export interface Profile {
   job_title: string;
   status: UserStatus;
   desk_id?: string;
+  team?: TeamColor;
+  health?: number;
+  kills?: number;
+  deaths?: number;
   created_at: string;
 }
 
@@ -85,10 +92,10 @@ export interface Snap {
   user_avatar: string;
   user_title: string;
   text: string;
-  image_emoji?: string;
   image_url?: string;
-  reactions: Record<string, number>; // e.g. { '❤️': 12, '☕': 5 }
-  comments: number;
+  image_emoji?: string;
+  comments?: number | Array<{ id: string; author: string; text: string }>;
+  reactions: Record<string, number>;
   user_reactions?: string[];
   created_at: string;
 }
@@ -99,8 +106,23 @@ export interface PlayerPosition {
   avatar: string;
   x: number;
   y: number;
+  rotation: number;
   direction: 'up' | 'down' | 'left' | 'right';
   isMoving: boolean;
   isSitting: boolean;
   status: UserStatus;
+  team: TeamColor;
+  health: number;
+  maxHealth: number;
+  currentWeapon: WeaponType;
+  ammo: number;
+  maxAmmo: number;
+}
+
+export interface CombatEventPayload {
+  attackerId: string;
+  attackerName: string;
+  victimId: string;
+  victimName: string;
+  weapon: WeaponType;
 }

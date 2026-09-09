@@ -17,8 +17,10 @@ export const MOCK_PROFILES: Profile[] = [
     avatar: 'character3',
     department: 'Engineering',
     job_title: 'Frontend Dev',
-    status: 'In a meeting',
+    status: 'Working',
     desk_id: 'desk-2',
+    team: 'red',
+    health: 100,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 8).toISOString(),
   },
   {
@@ -27,8 +29,10 @@ export const MOCK_PROFILES: Profile[] = [
     avatar: 'character2',
     department: 'Design',
     job_title: 'UI/UX Designer',
-    status: 'Available',
+    status: 'Working',
     desk_id: 'desk-3',
+    team: 'blue',
+    health: 100,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(),
   },
   {

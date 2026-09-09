@@ -207,7 +207,7 @@ export default function Sidebar({
                       </button>
                       <div className="flex items-center space-x-1 font-medium">
                         <MessageCircle className="w-3.5 h-3.5" />
-                        <span>{snap.comments}</span>
+                        <span>💬 {Array.isArray(snap.comments) ? snap.comments.length : (snap.comments ?? 0)}</span>
                       </div>
                     </div>
                     <button className="text-slate-500 hover:text-white">

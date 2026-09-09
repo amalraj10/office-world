@@ -96,20 +96,58 @@ export default function OfficeCanvas({ currentUser, onOpenChat, onStatusChange }
       {/* Phaser Canvas Container */}
       <div id="phaser-container" ref={containerRef} className="w-full h-full" />
 
-      {/* Welcome / greeting floating card (Top Left) */}
-      {showWelcome && (
-        <div className="absolute top-4 left-4 z-10 bg-[#0d131f]/90 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-slate-800/80 shadow-xl flex items-center space-x-3">
-          <span className="text-xl">☀️</span>
-          <div className="min-w-0">
-            <p className="text-xs font-bold text-white tracking-tight">
-              Good morning, {currentUser.name.split(' ')[0]} 👋
-            </p>
-            <p className="text-[10px] text-slate-400 font-medium">
-              8:42 AM • Tue, 9 Sep
-            </p>
+      {/* Welcome / greeting floating card & Combat HUD (Top Left) */}
+      <div className="absolute top-4 left-4 z-10 flex flex-col space-y-2">
+        {showWelcome && (
+          <div className="bg-[#0d131f]/90 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-slate-800/80 shadow-xl flex items-center space-x-3">
+            <span className="text-xl">☀️</span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white tracking-tight">
+                Good morning, {currentUser.name.split(' ')[0]} 👋
+              </p>
+              <p className="text-[10px] text-amber-400 font-bold">
+                🔫 2D COMBAT ARENA • Left Click: Shoot Ricochet Bullets 💫
+              </p>
+            </div>
           </div>
+        )}
+      </div>
+
+      {/* Combat Weapon & Ricochet Shooter HUD (Top Right overlay inside canvas) */}
+      <div className="absolute top-4 right-4 z-10 bg-[#0d131f]/95 border border-slate-800 p-3 rounded-2xl shadow-2xl flex items-center space-x-3">
+        <div className="flex items-center space-x-2 border-r border-slate-800 pr-3">
+          <button
+            onClick={() => {
+              if (gameRef.current) {
+                const scene = gameRef.current.scene.getScene('OfficeScene') as OfficeScene;
+                if (scene) scene.switchWeapon();
+              }
+            }}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow-md transition"
+          >
+            <span>🔫 Pistol / 🗡️ Knife</span>
+            <kbd className="bg-blue-900 text-blue-200 px-1.5 py-0.5 rounded text-[10px]">Q</kbd>
+          </button>
         </div>
-      )}
+
+        <div className="flex items-center space-x-3 text-xs font-mono">
+          <div>
+            <span className="text-slate-400 block text-[9px]">AMMO</span>
+            <span className="text-amber-400 font-bold text-xs">12 / 36</span>
+          </div>
+          <button
+            onClick={() => {
+              if (gameRef.current) {
+                const scene = gameRef.current.scene.getScene('OfficeScene') as OfficeScene;
+                if (scene) scene.reloadPistol();
+              }
+            }}
+            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold border border-slate-700"
+          >
+            RELOAD (R)
+          </button>
+        </div>
+      </div>
 
       {/* Movement controls legend (Bottom Left) */}
       <div className="absolute bottom-4 left-4 z-10 bg-[#0d131f]/90 backdrop-blur-md px-4 py-3 rounded-2xl border border-slate-800/80 shadow-xl flex items-center space-x-4 text-slate-300">

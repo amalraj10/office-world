@@ -230,7 +230,7 @@ export default function OfficePage() {
                       )}
                       <div className="flex items-center space-x-4 text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
                         <span>❤️ {likeTotal}</span>
-                        <span>💬 {snap.comments}</span>
+                        <span>💬 {Array.isArray(snap.comments) ? snap.comments.length : (snap.comments ?? 0)}</span>
                       </div>
                     </div>
                   );

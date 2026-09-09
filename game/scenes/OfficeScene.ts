@@ -7,6 +7,8 @@ export interface GameEventPayloads {
   'near-desk': { deskId: string; label: string; x: number; y: number } | null;
   'near-coworker': { userId: string; name: string; avatar: string; status: string } | null;
   'status-changed': UserStatus;
+  'combat-kill': { attackerName: string; victimName: string; weapon: 'pistol' | 'knife' };
+  'score-updated': { redKills: number; blueKills: number };
 }
 
 export interface OfficeSceneInitData {
@@ -32,15 +34,38 @@ export class OfficeScene extends Phaser.Scene {
     S: Phaser.Input.Keyboard.Key;
     D: Phaser.Input.Keyboard.Key;
   };
+  private knifeKey!: Phaser.Input.Keyboard.Key;
+  private reloadKey!: Phaser.Input.Keyboard.Key;
+  private switchWeaponKey!: Phaser.Input.Keyboard.Key;
   private shiftKey!: Phaser.Input.Keyboard.Key;
+  private walkStepTimer = 0;
+  private leftLegStep = false;
+
   private isSitting = false;
   private currentDesk: { id: string; label: string; x: number; y: number } | null = null;
   private currentNearCoworker: { userId: string; name: string; avatar: string; status: string } | null = null;
 
   private desksGroup!: Phaser.Physics.Arcade.StaticGroup;
   private wallsGroup!: Phaser.Physics.Arcade.StaticGroup;
-  private walkStepTimer = 0;
-  private leftLegStep = false;
+  private bulletsGroup!: Phaser.Physics.Arcade.Group;
+  private coworkersGroup!: Phaser.Physics.Arcade.Group;
+
+  // Combat State
+  public currentWeapon: 'pistol' | 'knife' = 'pistol';
+  public health = 100;
+  public maxHealth = 100;
+  public ammo = 12;
+  public maxAmmo = 12;
+  public totalAmmo = 36;
+  public isReloading = false;
+  public playerTeam: 'red' | 'blue' = 'blue';
+  public redKills = 0;
+  public blueKills = 0;
+
+  private gunSprite!: Phaser.GameObjects.Container;
+  private knifeSprite!: Phaser.GameObjects.Graphics;
+  private playerHpBarGraphics!: Phaser.GameObjects.Graphics;
+  private lastFiredTime = 0;
 
   public currentUser: {
     id: string;
@@ -71,6 +96,13 @@ export class OfficeScene extends Phaser.Scene {
     this.wallsGroup = this.physics.add.staticGroup();
     this.desksGroup = this.physics.add.staticGroup();
 
+    // Physics Bullet Group for Ricochet Shooting
+    this.bulletsGroup = this.physics.add.group({
+      defaultKey: 'bullet',
+      maxSize: 50,
+      runChildUpdate: true,
+    });
+
     // 1. Draw Architectural Floor Plan & Room Zones
     this.createFloorPlan();
 
@@ -83,13 +115,13 @@ export class OfficeScene extends Phaser.Scene {
     this.createGameAreaZone();
     this.createEntranceZone();
 
-    // 3. Draw Coworkers with Natural Chibi Visuals & Speech Bubbles
+    // 3. Draw Coworkers
     this.createCoworkers();
 
     // 4. Create Main Player (Amalraj)
     this.createPlayer();
 
-    // 5. Input Controls
+    // 5. Input Controls & Weapon Keys
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
       this.wasd = {
@@ -98,8 +130,17 @@ export class OfficeScene extends Phaser.Scene {
         S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
         D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
       };
-      this.shiftKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+      this.knifeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+      this.reloadKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+      this.switchWeaponKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     }
+
+    // Pointer Pointer Down -> Fire Pistol or Knife
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.leftButtonDown()) {
+        this.fireActiveWeapon();
+      }
+    });
 
     // Camera
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
@@ -109,6 +150,14 @@ export class OfficeScene extends Phaser.Scene {
     // Collisions
     this.physics.add.collider(this.player, this.wallsGroup);
     this.physics.add.collider(this.player, this.desksGroup);
+
+    // Bullet Ricochet Bounce on Walls & Desks
+    this.physics.add.collider(this.bulletsGroup, this.wallsGroup, (bulletObj) => {
+      this.handleBulletRicochet(bulletObj as Phaser.Types.Physics.Arcade.GameObjectWithBody);
+    });
+    this.physics.add.collider(this.bulletsGroup, this.desksGroup, (bulletObj) => {
+      this.handleBulletRicochet(bulletObj as Phaser.Types.Physics.Arcade.GameObjectWithBody);
+    });
   }
 
   // ----------------------------------------------------
@@ -1053,5 +1102,120 @@ export class OfficeScene extends Phaser.Scene {
       backgroundColor: '#1E293B',
       padding: { x: 8, y: 3 },
     }).setOrigin(0.5);
+  }
+
+  // ----------------------------------------------------
+  // COMBAT & RICOCHET SHOOTER METHODS
+  // ----------------------------------------------------
+  public fireActiveWeapon() {
+    const now = this.time.now;
+    if (this.currentWeapon === 'pistol') {
+      if (now - this.lastFiredTime < 220) return; // Fire rate limit
+      if (this.ammo <= 0) {
+        this.reloadPistol();
+        return;
+      }
+      this.lastFiredTime = now;
+      this.ammo -= 1;
+
+      // Pointer angle calculation
+      const pointer = this.input.activePointer;
+      const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
+
+      // Create Bullet Graphic
+      const bulletGraphics = this.add.graphics();
+      bulletGraphics.fillStyle(0xfacc15, 1); // Laser yellow core
+      bulletGraphics.fillCircle(0, 0, 4);
+      bulletGraphics.lineStyle(1.5, 0xef4444, 0.9); // Red energy aura outline
+      bulletGraphics.strokeCircle(0, 0, 5);
+
+      const bulletContainer = this.add.container(this.player.x, this.player.y, [bulletGraphics]);
+      this.physics.world.enable(bulletContainer);
+      const body = bulletContainer.body as Phaser.Physics.Arcade.Body;
+      body.setCircle(5);
+      body.setBounce(1, 1); // Perfect bounce reflection!
+      body.setCollideWorldBounds(true);
+
+      const speed = 550;
+      body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+      // Store ricochet bounce counter data
+      (bulletContainer as any).bounces = 0;
+      (bulletContainer as any).maxBounces = 3;
+
+      this.bulletsGroup.add(bulletContainer);
+
+      // Muzzle Flash Effect
+      const flash = this.add.circle(
+        this.player.x + Math.cos(angle) * 20,
+        this.player.y + Math.sin(angle) * 20,
+        9,
+        0xfde047
+      );
+      this.tweens.add({
+        targets: flash,
+        alpha: 0,
+        scale: 1.8,
+        duration: 80,
+        onComplete: () => flash.destroy(),
+      });
+    } else if (this.currentWeapon === 'knife') {
+      if (now - this.lastFiredTime < 400) return;
+      this.lastFiredTime = now;
+
+      const pointer = this.input.activePointer;
+      const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
+
+      // Knife Slash Arc Visual
+      const knifeArc = this.add.graphics();
+      knifeArc.lineStyle(3, 0xf8fafc, 0.95);
+      knifeArc.beginPath();
+      knifeArc.arc(this.player.x, this.player.y, 35, angle - 0.7, angle + 0.7, false);
+      knifeArc.strokePath();
+
+      this.tweens.add({
+        targets: knifeArc,
+        alpha: 0,
+        duration: 150,
+        onComplete: () => knifeArc.destroy(),
+      });
+    }
+  }
+
+  private handleBulletRicochet(bulletContainer: any) {
+    if (!bulletContainer || !bulletContainer.active) return;
+    bulletContainer.bounces = (bulletContainer.bounces || 0) + 1;
+
+    // Ricochet Spark Particle Visual
+    const spark = this.add.circle(bulletContainer.x, bulletContainer.y, 5, 0xf59e0b);
+    this.tweens.add({
+      targets: spark,
+      scale: 2,
+      alpha: 0,
+      duration: 120,
+      onComplete: () => spark.destroy(),
+    });
+
+    if (bulletContainer.bounces >= bulletContainer.maxBounces) {
+      bulletContainer.destroy();
+    }
+  }
+
+  public reloadPistol() {
+    if (this.isReloading || this.totalAmmo <= 0 || this.ammo >= this.maxAmmo) return;
+    this.isReloading = true;
+    this.time.delayedCall(1200, () => {
+      const needed = this.maxAmmo - this.ammo;
+      const reloaded = Math.min(needed, this.totalAmmo);
+      this.ammo += reloaded;
+      this.totalAmmo -= reloaded;
+      this.isReloading = false;
+    });
+  }
+
+  public switchWeapon() {
+    this.currentWeapon = this.currentWeapon === 'pistol' ? 'knife' : 'pistol';
   }
 }
