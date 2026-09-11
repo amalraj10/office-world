@@ -1,14 +1,18 @@
 import Phaser from 'phaser';
-import { CharacterConfig, PlayerPosition, UserStatus } from '@/types';
+import { CharacterConfig, PlayerPosition, UserStatus, WeaponType } from '@/types';
 import { getCharacterConfig } from '@/lib/characterPresets';
+import { WEAPONS_CATALOG } from '@/lib/weaponsCatalog';
+import { playGunshotSound, playRicochetSound, playHitImpactSound, playReloadSound, playDryClickSound } from '@/lib/audioFx';
 
 export interface GameEventPayloads {
   'player-moved': PlayerPosition;
   'near-desk': { deskId: string; label: string; x: number; y: number } | null;
   'near-coworker': { userId: string; name: string; avatar: string; status: string } | null;
+  'near-gunshop': boolean;
   'status-changed': UserStatus;
-  'combat-kill': { attackerName: string; victimName: string; weapon: 'pistol' | 'knife' };
+  'combat-kill': { attackerName: string; victimName: string; weapon: WeaponType };
   'score-updated': { redKills: number; blueKills: number };
+  'ammo-updated': { ammo: number; totalAmmo: number; isReloading: boolean; weapon: WeaponType };
 }
 
 export interface OfficeSceneInitData {
@@ -21,8 +25,8 @@ export interface OfficeSceneInitData {
   };
 }
 
-const WORLD_W = 1200;
-const WORLD_H = 820;
+const WORLD_W = 1600;
+const WORLD_H = 1000;
 
 export class OfficeScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Container;
@@ -37,6 +41,7 @@ export class OfficeScene extends Phaser.Scene {
   private knifeKey!: Phaser.Input.Keyboard.Key;
   private reloadKey!: Phaser.Input.Keyboard.Key;
   private switchWeaponKey!: Phaser.Input.Keyboard.Key;
+  private shopKey!: Phaser.Input.Keyboard.Key;
   private shiftKey!: Phaser.Input.Keyboard.Key;
   private walkStepTimer = 0;
   private leftLegStep = false;
@@ -49,15 +54,18 @@ export class OfficeScene extends Phaser.Scene {
   private wallsGroup!: Phaser.Physics.Arcade.StaticGroup;
   private bulletsGroup!: Phaser.Physics.Arcade.Group;
   private coworkersGroup!: Phaser.Physics.Arcade.Group;
+  private pickupsGroup!: Phaser.Physics.Arcade.Group;
 
   // Combat State
-  public currentWeapon: 'pistol' | 'knife' = 'pistol';
+  public currentWeapon: WeaponType = 'pistol';
   public health = 100;
   public maxHealth = 100;
+  public isDead = false;
   public ammo = 12;
   public maxAmmo = 12;
-  public totalAmmo = 36;
+  public totalAmmo = 240;
   public isReloading = false;
+  public playerCash = 1250;
   public playerTeam: 'red' | 'blue' = 'blue';
   public redKills = 0;
   public blueKills = 0;
@@ -65,6 +73,7 @@ export class OfficeScene extends Phaser.Scene {
   private gunSprite!: Phaser.GameObjects.Container;
   private knifeSprite!: Phaser.GameObjects.Graphics;
   private playerHpBarGraphics!: Phaser.GameObjects.Graphics;
+  private playerHpBarFill!: Phaser.GameObjects.Rectangle;
   private lastFiredTime = 0;
 
   public currentUser: {
@@ -117,6 +126,7 @@ export class OfficeScene extends Phaser.Scene {
     this.createLoungeZone();
     this.createGameAreaZone();
     this.createEntranceZone();
+    this.createGunShopZone();
 
     // 3. Draw Coworkers
     this.createCoworkers();
@@ -136,6 +146,12 @@ export class OfficeScene extends Phaser.Scene {
       this.knifeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
       this.reloadKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
       this.switchWeaponKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+      this.shopKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.B);
+      this.shiftKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+
+      this.reloadKey.on('down', () => this.reloadPistol());
+      this.switchWeaponKey.on('down', () => this.switchWeapon());
+      this.shopKey.on('down', () => this.refillAmmoFromShop());
     }
 
     // Pointer & Keyboard Down -> Fire Pistol or Knife
@@ -171,6 +187,22 @@ export class OfficeScene extends Phaser.Scene {
     this.physics.add.overlap(this.bulletsGroup, this.coworkersGroup, (bulletObj, coworkerObj) => {
       this.handleBulletHitCoworker(bulletObj as any, coworkerObj as any);
     });
+
+    // Glowing Map Pickups Group (Cash 💵 & Health ❤️ Medkits)
+    this.pickupsGroup = this.physics.add.group();
+    for (let i = 0; i < 8; i++) {
+      this.spawnRandomPickup();
+    }
+    this.time.addEvent({
+      delay: 3000,
+      callback: this.spawnRandomPickup,
+      callbackScope: this,
+      loop: true,
+    });
+
+    // Sync initial ammo and cash state with HUD UI
+    this.emitAmmoUpdate();
+    this.emitCashUpdate();
   }
 
   // ----------------------------------------------------
@@ -700,43 +732,73 @@ export class OfficeScene extends Phaser.Scene {
     this.createPottedPlant(edx + 130, edy + 80);
   }
 
+  private createGunShopZone() {
+    const g = this.add.graphics();
+    const gsx = 1250;
+    const gsy = 150;
+
+    // Gun Shop Floor Base
+    g.fillStyle(0x1e1b4b, 0.95);
+    g.fillRoundedRect(gsx, gsy, 300, 350, 16);
+    g.lineStyle(3, 0xf59e0b, 0.8);
+    g.strokeRoundedRect(gsx, gsy, 300, 350, 16);
+
+    // Neon Gun Shop Title Header
+    this.add.text(gsx + 150, gsy + 25, '🔫 WEAPONS & ARMORY SHOP', {
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#FBBF24',
+    }).setOrigin(0.5);
+
+    // Glass Counter Table
+    g.fillStyle(0x312e81, 1);
+    g.fillRoundedRect(gsx + 30, gsy + 60, 240, 40, 8);
+    g.lineStyle(2, 0x6366f1, 1);
+    g.strokeRoundedRect(gsx + 30, gsy + 60, 240, 40, 8);
+
+    this.add.text(gsx + 150, gsy + 80, '🛒 Press B / Walk Near to Buy Guns & Ammo', {
+      fontSize: '10px',
+      fontStyle: 'bold',
+      color: '#A5B4FC',
+    }).setOrigin(0.5);
+
+    // Display Weapon Rack Cabinets (Pistols, Rifles, Armor display)
+    [0, 1, 2].forEach((i) => {
+      const rx = gsx + 40 + i * 80;
+      const ry = gsy + 130;
+      g.fillStyle(0x0f172a, 1);
+      g.fillRoundedRect(rx, ry, 60, 90, 6);
+      g.lineStyle(1.5, 0x475569, 1);
+      g.strokeRoundedRect(rx, ry, 60, 90, 6);
+
+      // Weapon Icon Display inside racks
+      g.fillStyle(0xfde047, 1);
+      g.fillRect(rx + 15, ry + 30, 30, 8);
+      g.fillRect(rx + 25, ry + 38, 10, 15);
+    });
+
+    this.createZoneLabel(gsx + 150, gsy + 320, 'BLACK MARKET ARMORY');
+  }
+
   // ----------------------------------------------------
   // 3. COWORKERS & SPEECH BUBBLES
   // ----------------------------------------------------
   private createCoworkers() {
-    // Rahul (Top-Left Desk Cluster)
-    this.createStaticCoworker('Rahul', 285, 385, 'character3', 'Hey! Ready for the meeting?', {
-      shirtColor: 0xa855f7,
-      hasBeard: false,
-    });
+    // Original Desk Cluster
+    this.createStaticCoworker('Rahul', 285, 385, 'character3', 'Hey! Ready for the battle?', { shirtColor: 0xa855f7, hasBeard: false });
+    this.createStaticCoworker('Anu', 355, 415, 'character2', undefined, { shirtColor: 0xfacc15, hasBeard: false });
+    this.createStaticCoworker('Vishnu', 225, 545, 'character5', undefined, { shirtColor: 0x16a34a, hasBeard: true });
+    this.createStaticCoworker('Neha', 560, 545, 'character4', undefined, { shirtColor: 0xec4899, hasBeard: false });
+    this.createStaticCoworker('Dev', 735, 420, 'character1', undefined, { shirtColor: 0x16a34a, hasBeard: false });
+    this.createStaticCoworker('Sam', 775, 420, 'character6', undefined, { shirtColor: 0x334155, hasBeard: true });
 
-    // Anu (Beside Rahul)
-    this.createStaticCoworker('Anu', 355, 415, 'character2', undefined, {
-      shirtColor: 0xfacc15,
-      hasBeard: false,
-    });
-
-    // Vishnu (Bottom-Left Desk Cluster)
-    this.createStaticCoworker('Vishnu', 225, 545, 'character5', undefined, {
-      shirtColor: 0x16a34a,
-      hasBeard: true,
-    });
-
-    // Neha (Bottom-Right Desk Cluster)
-    this.createStaticCoworker('Neha', 560, 545, 'character4', undefined, {
-      shirtColor: 0xec4899,
-      hasBeard: false,
-    });
-
-    // Hallway Chatting Pair
-    this.createStaticCoworker('Dev', 735, 420, 'character1', 'Coffee break? ☕', {
-      shirtColor: 0x16a34a,
-      hasBeard: false,
-    });
-    this.createStaticCoworker('Sam', 775, 420, 'character6', undefined, {
-      shirtColor: 0x334155,
-      hasBeard: true,
-    });
+    // Expanded Map Additional Coworkers & Gun Shop Targets
+    this.createStaticCoworker('Victor (Arms Dealer)', 1400, 240, 'character5', 'Need more ammo? 🔫', { shirtColor: 0xd97706, hasBeard: true });
+    this.createStaticCoworker('Maya (Sniper)', 1320, 600, 'character2', 'Covering the right flank!', { shirtColor: 0xdc2626, hasBeard: false });
+    this.createStaticCoworker('Arjun (DevOps)', 1100, 750, 'character3', undefined, { shirtColor: 0x2563eb, hasBeard: true });
+    this.createStaticCoworker('Zoe (QA)', 1450, 820, 'character4', undefined, { shirtColor: 0x059669, hasBeard: false });
+    this.createStaticCoworker('Karan (Security)', 950, 200, 'character6', 'Halt! Who goes there?', { shirtColor: 0x7c3aed, hasBeard: true });
+    this.createStaticCoworker('Meera (Product)', 1050, 450, 'character2', undefined, { shirtColor: 0xdb2777, hasBeard: false });
   }
 
   private createStaticCoworker(
@@ -824,6 +886,12 @@ export class OfficeScene extends Phaser.Scene {
       pantsColor: 0x1e293b,
     });
 
+    // Overhead Health Bar (100 HP)
+    const hpBg = this.add.rectangle(0, -32, 36, 6, 0x0f172a);
+    const hpFill = this.add.rectangle(-17, -32, 34, 4, 0x22c55e);
+    hpFill.setOrigin(0, 0.5);
+    this.playerHpBarFill = hpFill;
+
     const nameBadge = this.add.text(0, 24, `• ${this.currentUser.name}`, {
       fontSize: '10px',
       fontStyle: 'bold',
@@ -839,7 +907,7 @@ export class OfficeScene extends Phaser.Scene {
     const gunGrip = this.add.rectangle(-2, 3, 3, 5, 0x0f172a);
     gunContainer.add([gunGrip, gunBody, gunBarrel]);
 
-    this.player.add([shadow, ...parts, gunContainer, nameBadge]);
+    this.player.add([shadow, ...parts, hpBg, hpFill, gunContainer, nameBadge]);
   }
 
   public updatePlayerCharacter(config: CharacterConfig) {
@@ -897,6 +965,81 @@ export class OfficeScene extends Phaser.Scene {
       }
     } else {
       this.player.setScale(1.0, 1.0);
+    }
+
+    // Dynamically Aim Gun & Rotate Player towards Mouse Cursor Pointer
+    const pointer = this.input.activePointer;
+    if (pointer && this.player) {
+      const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const aimAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
+      this.player.setRotation(aimAngle);
+    }
+
+    // Actively Move Flying Bullets Forward Every Frame (Guaranteed Motion)
+    if (this.bulletsGroup) {
+      this.bulletsGroup.getChildren().forEach((bObj: any) => {
+        if (bObj && bObj.active && bObj.vx !== undefined && bObj.vy !== undefined) {
+          bObj.x += bObj.vx * (delta / 1000);
+          bObj.y += bObj.vy * (delta / 1000);
+
+          // Check outer perimeter wall ricochet reflection
+          if (bObj.x <= 20) {
+            bObj.x = 21;
+            bObj.vx = Math.abs(bObj.vx);
+            if (bObj.body) bObj.body.velocity.x = bObj.vx;
+            this.handleBulletRicochet(bObj);
+          } else if (bObj.x >= WORLD_W - 20) {
+            bObj.x = WORLD_W - 21;
+            bObj.vx = -Math.abs(bObj.vx);
+            if (bObj.body) bObj.body.velocity.x = bObj.vx;
+            this.handleBulletRicochet(bObj);
+          }
+
+          if (bObj.y <= 20) {
+            bObj.y = 21;
+            bObj.vy = Math.abs(bObj.vy);
+            if (bObj.body) bObj.body.velocity.y = bObj.vy;
+            this.handleBulletRicochet(bObj);
+          } else if (bObj.y >= WORLD_H - 20) {
+            bObj.y = WORLD_H - 21;
+            bObj.vy = -Math.abs(bObj.vy);
+            if (bObj.body) bObj.body.velocity.y = bObj.vy;
+            this.handleBulletRicochet(bObj);
+          }
+
+          // Check coworker hit overlap
+          if (this.coworkersGroup) {
+            this.coworkersGroup.getChildren().forEach((cwObj: any) => {
+              if (cwObj && cwObj.active) {
+                const dist = Phaser.Math.Distance.Between(bObj.x, bObj.y, cwObj.x, cwObj.y);
+                if (dist < 28) {
+                  this.handleBulletHitCoworker(bObj, cwObj);
+                }
+              }
+            });
+          }
+
+          // Check player self-damage ONLY AFTER reflecting off wall/desk (bounces > 0)
+          if (bObj.bounces > 0 && this.player && this.player.active && !this.isDead) {
+            const distToPlayer = Phaser.Math.Distance.Between(bObj.x, bObj.y, this.player.x, this.player.y);
+            if (distToPlayer < 28) {
+              this.handleBulletHitPlayer(bObj);
+            }
+          }
+        }
+      });
+    }
+
+    // Collect glowing map pickups (Cash 💵 & Health Medkits ❤️)
+    if (this.pickupsGroup && this.player && this.player.active && !this.isDead) {
+      this.pickupsGroup.getChildren().forEach((pObj: any) => {
+        if (pObj && pObj.active) {
+          const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, pObj.x, pObj.y);
+          if (dist < 28) {
+            this.collectPickup(pObj);
+          }
+        }
+      });
     }
 
     this.game.events.emit('player-moved', {
@@ -1145,49 +1288,125 @@ export class OfficeScene extends Phaser.Scene {
 
   // ----------------------------------------------------
   // COMBAT & RICOCHET SHOOTER METHODS
+  // -----------------------------------------  // ----------------------------------------------------
+  // COMBAT & RICOCHET SHOOTER METHODS
   // ----------------------------------------------------
+  public equipWeapon(weaponType: WeaponType) {
+    const item = WEAPONS_CATALOG.find((w) => w.id === weaponType);
+    if (!item) return;
+    this.currentWeapon = weaponType;
+    this.maxAmmo = item.clipSize;
+    this.ammo = item.clipSize;
+    this.totalAmmo = item.reserveAmmo;
+    this.isReloading = false;
+    this.showNoticeText(`EQUIPPED ${item.icon} ${item.name.toUpperCase()}!`);
+    this.emitAmmoUpdate();
+  }
+
   public fireActiveWeapon(inputPointer?: Phaser.Input.Pointer) {
     const now = this.time.now;
-    if (this.currentWeapon === 'pistol') {
-      if (now - this.lastFiredTime < 150) return;
+    if (this.currentWeapon !== 'knife') {
+      if (this.isReloading) return;
+
+      const item = WEAPONS_CATALOG.find((w) => w.id === this.currentWeapon) || WEAPONS_CATALOG[0];
+      const fireInterval = item.id === 'laser' ? 110 : item.id === 'shotgun' ? 450 : item.id === 'rocket' ? 800 : 150;
+      if (now - this.lastFiredTime < fireInterval) return;
+
       if (this.ammo <= 0) {
-        this.reloadPistol();
+        if (this.totalAmmo > 0) {
+          this.reloadPistol();
+        } else {
+          playDryClickSound();
+          this.showNoticeText('⚠️ OUT OF AMMO! Press B to Open Store');
+        }
         return;
       }
+
       this.lastFiredTime = now;
       this.ammo -= 1;
+      this.emitAmmoUpdate();
 
       // Pointer angle calculation
       const pointer = inputPointer || this.input.activePointer;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-      const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
+      const mainAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
 
-      // Create Visible Bullet Physics Circle
-      const bullet = this.add.circle(this.player.x, this.player.y, 6, 0xfacc15);
-      bullet.setStrokeStyle(2, 0xef4444);
-      bullet.setDepth(100);
+      const barrelOffset = 25;
+      const spawnX = this.player.x + Math.cos(mainAngle) * barrelOffset;
+      const spawnY = this.player.y + Math.sin(mainAngle) * barrelOffset;
 
-      this.physics.world.enable(bullet);
-      const body = bullet.body as Phaser.Physics.Arcade.Body;
-      body.setCircle(6);
-      body.setBounce(1, 1);
-      body.setCollideWorldBounds(true);
+      playGunshotSound();
 
-      const speed = 700;
-      body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+      // Determine projectile count (Shotgun = 5 spread pellets, others = 1)
+      const angles = item.id === 'shotgun'
+        ? [mainAngle - 0.22, mainAngle - 0.11, mainAngle, mainAngle + 0.11, mainAngle + 0.22]
+        : [mainAngle];
 
-      (bullet as any).bounces = 0;
-      (bullet as any).maxBounces = 4;
+      angles.forEach((angle) => {
+        const vx = Math.cos(angle) * item.bulletSpeed;
+        const vy = Math.sin(angle) * item.bulletSpeed;
 
-      this.bulletsGroup.add(bullet);
+        const textureKey = `bullet_${item.id}`;
+        if (!this.textures.exists(textureKey)) {
+          const bg = this.make.graphics();
+          if (item.id === 'laser') {
+            bg.fillStyle(0x06b6d4, 0.9);
+            bg.fillRoundedRect(0, 1, 24, 6, 3);
+            bg.fillStyle(0xffffff, 1);
+            bg.fillRect(4, 2.5, 16, 3);
+            bg.generateTexture(textureKey, 24, 8);
+          } else if (item.id === 'rocket') {
+            bg.fillStyle(0xef4444, 1);
+            bg.fillTriangle(20, 0, 32, 6, 20, 12);
+            bg.fillStyle(0x1e293b, 1);
+            bg.fillRoundedRect(4, 2, 18, 8, 2);
+            bg.fillStyle(0xf97316, 1);
+            bg.fillTriangle(0, 1, 6, 6, 0, 11);
+            bg.generateTexture(textureKey, 32, 12);
+          } else if (item.id === 'shotgun') {
+            bg.fillStyle(0xf97316, 0.9);
+            bg.fillCircle(4, 4, 4);
+            bg.fillStyle(0xfde047, 1);
+            bg.fillCircle(4, 4, 2);
+            bg.generateTexture(textureKey, 8, 8);
+          } else {
+            bg.fillStyle(0xef4444, 0.8);
+            bg.fillTriangle(0, 0, 10, 4, 0, 8);
+            bg.fillStyle(0xfde047, 1);
+            bg.fillRoundedRect(8, 1, 14, 6, 2);
+            bg.fillStyle(0xdc2626, 1);
+            bg.fillTriangle(20, 0, 28, 4, 20, 8);
+            bg.generateTexture(textureKey, 30, 10);
+          }
+        }
 
-      // Muzzle Flash Effect
-      const flash = this.add.circle(
-        this.player.x + Math.cos(angle) * 22,
-        this.player.y + Math.sin(angle) * 22,
-        12,
-        0xfde047
-      );
+        const bullet = this.physics.add.sprite(spawnX, spawnY, textureKey);
+        bullet.setRotation(angle);
+        bullet.setDepth(100);
+
+        const body = bullet.body as Phaser.Physics.Arcade.Body;
+        body.setCircle(item.id === 'rocket' ? 8 : 4);
+        body.setBounce(1, 1);
+        body.setCollideWorldBounds(true);
+        body.setVelocity(vx, vy);
+
+        (bullet as any).vx = vx;
+        (bullet as any).vy = vy;
+        (bullet as any).bounces = 0;
+        (bullet as any).maxBounces = item.maxBounces;
+        (bullet as any).spawnTime = this.time.now;
+        (bullet as any).damage = item.id === 'shotgun' ? 15 : item.damage;
+
+        this.time.delayedCall(2500, () => {
+          if (bullet && bullet.active) bullet.destroy();
+        });
+
+        this.bulletsGroup.add(bullet);
+      });
+
+      // Muzzle Flash
+      const flashColor = item.id === 'laser' ? 0x06b6d4 : item.id === 'rocket' ? 0xef4444 : 0xfde047;
+      const flash = this.add.circle(spawnX, spawnY, item.id === 'rocket' ? 22 : 14, flashColor);
       flash.setDepth(101);
       this.tweens.add({
         targets: flash,
@@ -1196,27 +1415,136 @@ export class OfficeScene extends Phaser.Scene {
         duration: 80,
         onComplete: () => flash.destroy(),
       });
+
+      if (this.ammo <= 0 && this.totalAmmo > 0) {
+        this.time.delayedCall(200, () => this.reloadPistol());
+      }
     } else if (this.currentWeapon === 'knife') {
-      if (now - this.lastFiredTime < 350) return;
+      if (now - this.lastFiredTime < 250) return;
       this.lastFiredTime = now;
 
       const pointer = inputPointer || this.input.activePointer;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
 
-      // Knife Slash Arc Visual
+      // Katana Slash Arc Visual
       const knifeArc = this.add.graphics();
       knifeArc.setDepth(102);
-      knifeArc.lineStyle(4, 0xf8fafc, 0.95);
+      knifeArc.lineStyle(6, 0x38bdf8, 0.95);
       knifeArc.beginPath();
-      knifeArc.arc(this.player.x, this.player.y, 40, angle - 0.8, angle + 0.8, false);
+      knifeArc.arc(this.player.x, this.player.y, 55, angle - 1.1, angle + 1.1, false);
       knifeArc.strokePath();
+
+      playHitImpactSound();
 
       this.tweens.add({
         targets: knifeArc,
         alpha: 0,
-        duration: 150,
+        scale: 1.25,
+        duration: 160,
         onComplete: () => knifeArc.destroy(),
+      });
+
+      // Katana / Knife Melee Slash Damage (60 DMG) to close-range target coworkers
+      const item = WEAPONS_CATALOG.find((w) => w.id === 'knife') || { damage: 60 };
+      const slashDamage = item.damage || 60;
+      const attackRange = 75; // Slash reach radius in pixels
+
+      const children = (this.coworkersGroup.getChildren() as any[]).filter((cw) => cw && cw.active);
+      children.forEach((coworker) => {
+        const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, coworker.x, coworker.y);
+        if (dist <= attackRange) {
+          const targetAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, coworker.x, coworker.y);
+          const radDiff = Phaser.Math.Angle.WrapDegrees((targetAngle - angle) * (180 / Math.PI)) * (Math.PI / 180);
+          const angleDiff = Math.abs(radDiff);
+          
+          // Check if coworker is within the 150-degree slash arc (+/- ~1.3 rads)
+          if (angleDiff <= 1.3 || angleDiff >= Math.PI * 2 - 1.3) {
+            // Apply melee damage
+            coworker.hp = Math.max(0, (coworker.hp || 100) - slashDamage);
+
+            // Update Overhead HP Bar
+            const hpRatio = coworker.hp / coworker.maxHp;
+            if (coworker.hpFill) {
+              coworker.hpFill.width = 34 * hpRatio;
+              if (hpRatio < 0.3) {
+                coworker.hpFill.fillColor = 0xef4444; // Red low HP
+              } else if (hpRatio < 0.6) {
+                coworker.hpFill.fillColor = 0xf59e0b; // Yellow mid HP
+              }
+            }
+
+            // Slash Hit Visual Spark
+            const slashSpark = this.add.circle(coworker.x, coworker.y, 18, 0x06b6d4, 0.95);
+            slashSpark.setDepth(104);
+            this.tweens.add({
+              targets: slashSpark,
+              scale: 2.5,
+              alpha: 0,
+              duration: 150,
+              onComplete: () => slashSpark.destroy(),
+            });
+
+            // Floating Damage Text (-60 HP!)
+            const dmgText = this.add.text(coworker.x, coworker.y - 25, `-${slashDamage} HP`, {
+              fontSize: '14px',
+              fontStyle: 'extrabold',
+              color: '#38BDF8',
+              backgroundColor: '#0F172A',
+              padding: { x: 5, y: 3 },
+            }).setOrigin(0.5);
+            dmgText.setDepth(105);
+
+            this.tweens.add({
+              targets: dmgText,
+              y: coworker.y - 55,
+              alpha: 0,
+              duration: 650,
+              onComplete: () => dmgText.destroy(),
+            });
+
+            // Award cash reward on hit!
+            this.playerCash += 35;
+            this.emitCashUpdate();
+
+            // Check if Coworker Life Gone -> DIE / ELIMINATION!
+            if (coworker.hp <= 0) {
+              this.playerCash += 200;
+              this.showNoticeText(`🗡️ KATANA ELIMINATION: +$200 CASH!`);
+              this.emitCashUpdate();
+
+              this.spawnPickupAt(coworker.x - 15, coworker.y, 'cash');
+              this.spawnPickupAt(coworker.x + 15, coworker.y, 'health');
+
+              const elimText = this.add.text(coworker.x, coworker.y - 30, '☠️ ELIMINATED!', {
+                fontSize: '14px',
+                fontStyle: 'extrabold',
+                color: '#EF4444',
+                backgroundColor: '#000000',
+                padding: { x: 6, y: 3 },
+              }).setOrigin(0.5);
+              elimText.setDepth(106);
+
+              this.tweens.add({
+                targets: elimText,
+                y: coworker.y - 65,
+                alpha: 0,
+                duration: 900,
+                onComplete: () => elimText.destroy(),
+              });
+
+              this.tweens.add({
+                targets: coworker,
+                alpha: 0,
+                scale: 0.2,
+                duration: 300,
+                onComplete: () => {
+                  coworker.destroy();
+                },
+              });
+            }
+          }
+        }
       });
     }
   }
@@ -1225,12 +1553,25 @@ export class OfficeScene extends Phaser.Scene {
     if (!bulletContainer || !bulletContainer.active) return;
     bulletContainer.bounces = (bulletContainer.bounces || 0) + 1;
 
+    // Play Ricochet Audio Sound!
+    playRicochetSound();
+
+    // Update bullet capsule angle and manual velocity (vx, vy) to match new ricochet velocity vector
+    if (bulletContainer.body) {
+      if (Math.abs(bulletContainer.body.velocity.x) > 10 || Math.abs(bulletContainer.body.velocity.y) > 10) {
+        bulletContainer.vx = bulletContainer.body.velocity.x;
+        bulletContainer.vy = bulletContainer.body.velocity.y;
+      }
+      const newAngle = Math.atan2(bulletContainer.vy || bulletContainer.body.velocity.y, bulletContainer.vx || bulletContainer.body.velocity.x);
+      bulletContainer.setRotation(newAngle);
+    }
+
     // Ricochet Spark Particle Visual
-    const spark = this.add.circle(bulletContainer.x, bulletContainer.y, 5, 0xf59e0b);
+    const spark = this.add.circle(bulletContainer.x, bulletContainer.y, 6, 0xf59e0b);
     spark.setDepth(103);
     this.tweens.add({
       targets: spark,
-      scale: 2,
+      scale: 2.5,
       alpha: 0,
       duration: 120,
       onComplete: () => spark.destroy(),
@@ -1244,11 +1585,14 @@ export class OfficeScene extends Phaser.Scene {
   private handleBulletHitCoworker(bullet: any, coworker: any) {
     if (!bullet || !bullet.active || !coworker || !coworker.active) return;
 
+    // Play Body Hit Impact Sound!
+    playHitImpactSound();
+
     // Destroy bullet on hit
     bullet.destroy();
 
-    // Reduce HP by 25 damage per bullet
-    const damage = 25;
+    // Reduce HP by weapon damage per bullet
+    const damage = (bullet as any).damage || 25;
     coworker.hp = Math.max(0, (coworker.hp || 100) - damage);
 
     // Update Overhead HP Bar
@@ -1291,8 +1635,21 @@ export class OfficeScene extends Phaser.Scene {
       onComplete: () => dmgText.destroy(),
     });
 
+    // Award cash reward on hit!
+    this.playerCash += 25;
+    this.emitCashUpdate();
+
     // Check if Coworker Life Gone -> DIE / ELIMINATION!
     if (coworker.hp <= 0) {
+      // Award big kill bonus cash ($200)!
+      this.playerCash += 200;
+      this.showNoticeText(`☠️ KILL BONUS: +$200 CASH!`);
+      this.emitCashUpdate();
+
+      // Drop glowing Cash Bag & Medkit right where coworker died!
+      this.spawnPickupAt(coworker.x - 15, coworker.y, 'cash');
+      this.spawnPickupAt(coworker.x + 15, coworker.y, 'health');
+
       // Skull Elimination Text
       const deathText = this.add.text(coworker.x, coworker.y - 15, `☠️ ${coworker.coworkerName} ELIMINATED!`, {
         fontSize: '12px',
@@ -1324,19 +1681,259 @@ export class OfficeScene extends Phaser.Scene {
     }
   }
 
+  private handleBulletHitPlayer(bullet: any) {
+    if (this.isDead || !bullet || !bullet.active || !this.player || !this.player.active) return;
+
+    // Play Body Hit Impact Sound!
+    playHitImpactSound();
+
+    // Destroy ricocheting bullet on hit
+    bullet.destroy();
+
+    // Reduce player HP by weapon damage per bullet
+    const damage = (bullet as any).damage || 25;
+    this.health = Math.max(0, this.health - damage);
+
+    // Update Overhead Player HP Bar
+    const hpRatio = this.health / this.maxHealth;
+    if (this.playerHpBarFill) {
+      this.playerHpBarFill.width = 34 * hpRatio;
+      if (hpRatio < 0.3) {
+        this.playerHpBarFill.fillColor = 0xef4444; // Red low HP
+      } else if (hpRatio < 0.6) {
+        this.playerHpBarFill.fillColor = 0xf59e0b; // Yellow mid HP
+      } else {
+        this.playerHpBarFill.fillColor = 0x22c55e; // Green full HP
+      }
+    }
+
+    // Floating Red Damage Text above player head (-25 HP!)
+    const dmgText = this.add.text(this.player.x, this.player.y - 25, `-${damage} HP`, {
+      fontSize: '14px',
+      fontStyle: 'extrabold',
+      color: '#EF4444',
+      backgroundColor: '#0F172A',
+      padding: { x: 5, y: 2 },
+    }).setOrigin(0.5).setDepth(105);
+
+    this.tweens.add({
+      targets: dmgText,
+      y: this.player.y - 55,
+      alpha: 0,
+      duration: 700,
+      onComplete: () => dmgText.destroy(),
+    });
+
+    // Red Screen Flash Damage Effect
+    const flash = this.add.rectangle(this.cameras.main.centerX, this.cameras.main.centerY, 1600, 1000, 0xef4444, 0.25);
+    flash.setScrollFactor(0);
+    flash.setDepth(200);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 200,
+      onComplete: () => flash.destroy(),
+    });
+
+    // Check if Player HP reaches 0 -> ELIMINATION & RESPAWN!
+    if (this.health <= 0) {
+      this.isDead = true;
+      const deathText = this.add.text(this.player.x, this.player.y - 20, `☠️ YOU WERE ELIMINATED BY RICOCHET!`, {
+        fontSize: '14px',
+        fontStyle: 'bold',
+        color: '#FFFFFF',
+        backgroundColor: '#DC2626',
+        padding: { x: 10, y: 5 },
+      }).setOrigin(0.5).setDepth(201);
+
+      this.tweens.add({
+        targets: deathText,
+        y: this.player.y - 60,
+        alpha: 0,
+        duration: 2000,
+        onComplete: () => deathText.destroy(),
+      });
+
+      // Respawn after 2 seconds
+      this.time.delayedCall(2000, () => {
+        this.health = 100;
+        this.isDead = false;
+        if (this.playerHpBarFill) {
+          this.playerHpBarFill.width = 34;
+          this.playerHpBarFill.fillColor = 0x22c55e;
+        }
+        this.player.setPosition(450, 465);
+        this.showNoticeText('⚡ RESPAWNED WITH FULL HEALTH!');
+      });
+    }
+  }
+
   public reloadPistol() {
-    if (this.isReloading || this.totalAmmo <= 0 || this.ammo >= this.maxAmmo) return;
+    if (this.isReloading) return;
+    if (this.ammo >= this.maxAmmo) {
+      this.showNoticeText('⚡ CLIP FULL (12/12)');
+      return;
+    }
+    if (this.totalAmmo <= 0) {
+      playDryClickSound();
+      this.showNoticeText('⚠️ NO RESERVE AMMO! Press B to Refill');
+      return;
+    }
+
     this.isReloading = true;
-    this.time.delayedCall(1200, () => {
+    playReloadSound();
+    this.showNoticeText('⏳ RELOADING...');
+    this.emitAmmoUpdate();
+
+    this.time.delayedCall(1000, () => {
       const needed = this.maxAmmo - this.ammo;
       const reloaded = Math.min(needed, this.totalAmmo);
       this.ammo += reloaded;
       this.totalAmmo -= reloaded;
       this.isReloading = false;
+      this.emitAmmoUpdate();
+    });
+  }
+
+  public refillAmmoFromShop() {
+    this.totalAmmo += 120;
+    playReloadSound();
+    this.showNoticeText('🛒 +120 AMMO REFILLED!');
+    this.emitAmmoUpdate();
+  }
+
+  private showNoticeText(msg: string) {
+    if (!this.player) return;
+    const txt = this.add.text(this.player.x, this.player.y - 35, msg, {
+      fontSize: '11px',
+      fontStyle: 'bold',
+      color: '#FBBF24',
+      backgroundColor: '#0F172A',
+      padding: { x: 6, y: 3 },
+    }).setOrigin(0.5).setDepth(110);
+
+    this.tweens.add({
+      targets: txt,
+      y: this.player.y - 65,
+      alpha: 0,
+      duration: 1200,
+      onComplete: () => txt.destroy(),
     });
   }
 
   public switchWeapon() {
     this.currentWeapon = this.currentWeapon === 'pistol' ? 'knife' : 'pistol';
+    this.emitAmmoUpdate();
+  }
+
+  public emitAmmoUpdate() {
+    this.game.events.emit('ammo-updated', {
+      ammo: this.ammo,
+      totalAmmo: this.totalAmmo,
+      isReloading: this.isReloading,
+      weapon: this.currentWeapon,
+    });
+  }
+
+  public emitCashUpdate() {
+    this.game.events.emit('cash-updated', { cash: this.playerCash });
+  }
+
+  private spawnRandomPickup() {
+    if (!this.pickupsGroup) return;
+    if (this.pickupsGroup.getLength() >= 16) return;
+
+    const type = Math.random() > 0.4 ? 'cash' : 'health';
+    const px = Phaser.Math.Between(120, WORLD_W - 120);
+    const py = Phaser.Math.Between(120, WORLD_H - 120);
+    this.spawnPickupAt(px, py, type);
+  }
+
+  private spawnPickupAt(px: number, py: number, type: 'cash' | 'health') {
+    if (!this.pickupsGroup) return;
+
+    const container = this.add.container(px, py);
+
+    // Glowing Aura Effect
+    const auraColor = type === 'cash' ? 0xf59e0b : 0x22c55e;
+    const aura = this.add.circle(0, 0, 18, auraColor, 0.45);
+
+    // Pulsing animation for glowing pickup
+    this.tweens.add({
+      targets: aura,
+      scale: 1.4,
+      alpha: 0.15,
+      yoyo: true,
+      repeat: -1,
+      duration: 800,
+    });
+
+    const icon = this.add.text(0, -2, type === 'cash' ? '💵' : '❤️', {
+      fontSize: '18px',
+    }).setOrigin(0.5);
+
+    const badge = this.add.text(0, 16, type === 'cash' ? '+$200 CASH' : '+35 HP', {
+      fontSize: '9px',
+      fontStyle: 'bold',
+      color: type === 'cash' ? '#FBBF24' : '#4ADE80',
+      backgroundColor: '#0F172A',
+      padding: { x: 4, y: 1 },
+    }).setOrigin(0.5);
+
+    container.add([aura, icon, badge]);
+    (container as any).pickupType = type;
+    (container as any).x = px;
+    (container as any).y = py;
+
+    this.pickupsGroup.add(container);
+  }
+
+  private collectPickup(pObj: any) {
+    if (!pObj || !pObj.active) return;
+    const type = pObj.pickupType || 'cash';
+    pObj.destroy();
+
+    playReloadSound();
+
+    if (type === 'cash') {
+      const reward = 200;
+      this.playerCash += reward;
+      this.showNoticeText(`💵 +$${reward} CASH PICKUP!`);
+      this.emitCashUpdate();
+    } else if (type === 'health') {
+      const healAmount = 35;
+      this.health = Math.min(this.maxHealth, this.health + healAmount);
+      this.updatePlayerHpBarVisual();
+      this.showNoticeText(`❤️ +${healAmount} HP RESTORED!`);
+    }
+
+    const spark = this.add.circle(this.player.x, this.player.y, 22, type === 'cash' ? 0xfbbf24 : 0x4ade80, 0.85);
+    spark.setDepth(110);
+    this.tweens.add({
+      targets: spark,
+      scale: 2.2,
+      alpha: 0,
+      duration: 250,
+      onComplete: () => spark.destroy(),
+    });
+
+    // Schedule a new pickup to spawn shortly after collecting (Continuous Dynamic Respawn!)
+    this.time.delayedCall(2500, () => {
+      this.spawnRandomPickup();
+    });
+  }
+
+  private updatePlayerHpBarVisual() {
+    const hpRatio = this.health / this.maxHealth;
+    if (this.playerHpBarFill) {
+      this.playerHpBarFill.width = 34 * hpRatio;
+      if (hpRatio < 0.3) {
+        this.playerHpBarFill.fillColor = 0xef4444;
+      } else if (hpRatio < 0.6) {
+        this.playerHpBarFill.fillColor = 0xf59e0b;
+      } else {
+        this.playerHpBarFill.fillColor = 0x22c55e;
+      }
+    }
   }
 }

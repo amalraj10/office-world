@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { createOfficeGame } from '@/game/OfficeGame';
 import { OfficeScene } from '@/game/scenes/OfficeScene';
-import { CharacterConfig, UserStatus } from '@/types';
-import { MessageSquare, Armchair, ChevronRight, Sun, Moon, X } from 'lucide-react';
+import { CharacterConfig, UserStatus, WeaponItem, WeaponType } from '@/types';
+import { MessageSquare, Armchair, ChevronRight, ShoppingBag } from 'lucide-react';
+import GunShopModal from '@/components/office/GunShopModal';
 
 interface OfficeCanvasProps {
   currentUser: {
@@ -25,14 +26,24 @@ export default function OfficeCanvas({ currentUser, onOpenChat, onStatusChange }
 
   const [nearDesk, setNearDesk] = useState<{ id: string; label: string; x: number; y: number } | null>(null);
   const [nearCoworker, setNearCoworker] = useState<{ userId: string; name: string; avatar: string; status: string } | null>(null);
+  const [nearGunShop, setNearGunShop] = useState(false);
   const [isSitting, setIsSitting] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [now, setNow] = useState(new Date());
+
+  const [isGunShopOpen, setIsGunShopOpen] = useState(false);
+  const [playerCash, setPlayerCash] = useState(1250);
+  const [unlockedWeapons, setUnlockedWeapons] = useState<WeaponType[]>(['pistol', 'knife']);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(timer);
   }, []);
+
+  const [ammo, setAmmo] = useState(12);
+  const [totalAmmo, setTotalAmmo] = useState(240);
+  const [isReloading, setIsReloading] = useState(false);
+  const [currentWeapon, setCurrentWeapon] = useState<WeaponType>('pistol');
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -54,12 +65,49 @@ export default function OfficeCanvas({ currentUser, onOpenChat, onStatusChange }
         'near-coworker',
         (coworker: { userId: string; name: string; avatar: string; status: string } | null) => setNearCoworker(coworker)
       );
+      game.events.on('near-gunshop', (near: boolean) => setNearGunShop(near));
       game.events.on('status-changed', (status: UserStatus) => {
         onStatusChange(status);
       });
+      game.events.on('cash-updated', (data: { cash: number }) => {
+        setPlayerCash(data.cash);
+      });
+      game.events.on('ammo-updated', (data: { ammo: number; totalAmmo: number; isReloading: boolean; weapon: WeaponType }) => {
+        setAmmo(data.ammo);
+        setTotalAmmo(data.totalAmmo);
+        setIsReloading(data.isReloading);
+        setCurrentWeapon(data.weapon);
+      });
+
+      // Ensure scene ammo & cash state syncs with React HUD after scene boot
+      setTimeout(() => {
+        const scene = game.scene.getScene('OfficeScene') as OfficeScene;
+        if (scene) {
+          scene.emitAmmoUpdate();
+          scene.emitCashUpdate();
+        }
+      }, 300);
     }
 
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (!gameRef.current) return;
+      const scene = gameRef.current.scene.getScene('OfficeScene') as OfficeScene;
+      if (!scene) return;
+
+      if (e.key === 'r' || e.key === 'R') {
+        scene.reloadPistol();
+      } else if (e.key === 'q' || e.key === 'Q') {
+        scene.switchWeapon();
+      } else if (e.key === 'b' || e.key === 'B') {
+        setIsGunShopOpen((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
     return () => {
+      window.removeEventListener('keydown', handleKeyDown);
       if (gameRef.current) {
         gameRef.current.destroy(true);
         gameRef.current = null;
@@ -87,9 +135,25 @@ export default function OfficeCanvas({ currentUser, onOpenChat, onStatusChange }
     }
   };
 
-  const hour = now.getHours();
-  const isDay = hour >= 6 && hour < 18;
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const handleBuyWeapon = (weapon: WeaponItem) => {
+    if (playerCash >= weapon.price && !unlockedWeapons.includes(weapon.id)) {
+      setPlayerCash((prev) => prev - weapon.price);
+      setUnlockedWeapons((prev) => [...prev, weapon.id]);
+      if (gameRef.current) {
+        const scene = gameRef.current.scene.getScene('OfficeScene') as OfficeScene;
+        if (scene) scene.equipWeapon(weapon.id);
+      }
+    }
+  };
+
+  const handleEquipWeapon = (weaponType: WeaponType) => {
+    if (gameRef.current) {
+      const scene = gameRef.current.scene.getScene('OfficeScene') as OfficeScene;
+      if (scene) scene.equipWeapon(weaponType);
+    }
+  };
+
+  const weaponIcon = currentWeapon === 'shotgun' ? '💥 Shotgun' : currentWeapon === 'laser' ? '⚡ Laser' : currentWeapon === 'rocket' ? '🚀 Rocket' : currentWeapon === 'knife' ? '🗡️ Katana' : '🔫 Pistol';
 
   return (
     <div className="relative w-full h-full min-h-[550px] bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
@@ -106,7 +170,7 @@ export default function OfficeCanvas({ currentUser, onOpenChat, onStatusChange }
                 Good morning, {currentUser.name.split(' ')[0]} 👋
               </p>
               <p className="text-[10px] text-amber-400 font-bold">
-                🔫 2D COMBAT ARENA • Left Click: Shoot Ricochet Bullets 💫
+                🔫 ARENA ARMORY • Click: Fire • R: Reload • B: Black Market Gun Store 🛒
               </p>
             </div>
           </div>
@@ -114,37 +178,68 @@ export default function OfficeCanvas({ currentUser, onOpenChat, onStatusChange }
       </div>
 
       {/* Combat Weapon & Ricochet Shooter HUD (Top Right overlay inside canvas) */}
-      <div className="absolute top-4 right-4 z-10 bg-[#0d131f]/95 border border-slate-800 p-3 rounded-2xl shadow-2xl flex items-center space-x-3">
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute top-4 right-4 z-10 bg-[#0d131f]/95 border border-slate-800 p-3 rounded-2xl shadow-2xl flex items-center space-x-3"
+      >
+        {/* Cash Balance Display */}
+        <div className="flex items-center space-x-1.5 bg-emerald-950/80 border border-emerald-500/50 px-3 py-1.5 rounded-xl border-r border-slate-800 pr-3">
+          <span className="text-sm">💵</span>
+          <span className="text-xs font-black text-emerald-400 font-mono tracking-wide">
+            ${playerCash.toLocaleString()}
+          </span>
+        </div>
+
         <div className="flex items-center space-x-2 border-r border-slate-800 pr-3">
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               if (gameRef.current) {
                 const scene = gameRef.current.scene.getScene('OfficeScene') as OfficeScene;
                 if (scene) scene.switchWeapon();
               }
             }}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow-md transition"
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow-md transition cursor-pointer"
           >
-            <span>🔫 Pistol / 🗡️ Knife</span>
+            <span>{weaponIcon}</span>
             <kbd className="bg-blue-900 text-blue-200 px-1.5 py-0.5 rounded text-[10px]">Q</kbd>
           </button>
         </div>
 
         <div className="flex items-center space-x-3 text-xs font-mono">
           <div>
-            <span className="text-slate-400 block text-[9px]">AMMO</span>
-            <span className="text-amber-400 font-bold text-xs">12 / 36</span>
+            <span className="text-slate-400 block text-[9px]">MAGAZINE</span>
+            <div className="flex items-center space-x-1">
+              <span className={`font-extrabold text-sm ${isReloading ? 'text-amber-400 animate-pulse' : ammo > 3 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {isReloading ? '⏳ RELOADING...' : `${ammo} / ${totalAmmo}`}
+              </span>
+            </div>
           </div>
+
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               if (gameRef.current) {
                 const scene = gameRef.current.scene.getScene('OfficeScene') as OfficeScene;
                 if (scene) scene.reloadPistol();
               }
             }}
-            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold border border-slate-700"
+            disabled={isReloading}
+            className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 disabled:opacity-40 text-white rounded-xl text-[10px] font-bold shadow transition cursor-pointer"
           >
-            RELOAD (R)
+            {isReloading ? '⏳...' : 'RELOAD (R)'}
+          </button>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsGunShopOpen(true);
+            }}
+            className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-amber-950/50 transition cursor-pointer flex items-center space-x-1"
+          >
+            <ShoppingBag className="w-3.5 h-3.5" />
+            <span>GUN STORE (B)</span>
           </button>
         </div>
       </div>
@@ -163,17 +258,35 @@ export default function OfficeCanvas({ currentUser, onOpenChat, onStatusChange }
           <span className="text-[9px] text-slate-400 mt-1 font-medium">Move</span>
         </div>
 
-        <div className="flex flex-col space-y-2 text-[10px]">
+        <div className="flex flex-col space-y-1 text-[10px]">
           <div className="flex items-center space-x-2">
-            <kbd className="px-2 py-0.5 bg-slate-800/90 border border-slate-700/80 rounded text-[9px] font-bold text-white shadow-sm">E</kbd>
-            <span className="text-slate-300 font-medium">Interact</span>
+            <kbd className="px-1.5 py-0.5 bg-slate-800/90 border border-slate-700/80 rounded text-[9px] font-bold text-white shadow-sm">B</kbd>
+            <span className="text-slate-300 font-medium">Gun Store Modal</span>
           </div>
           <div className="flex items-center space-x-2">
-            <kbd className="px-2 py-0.5 bg-slate-800/90 border border-slate-700/80 rounded text-[9px] font-bold text-white shadow-sm">Shift</kbd>
-            <span className="text-slate-300 font-medium">Run</span>
+            <kbd className="px-1.5 py-0.5 bg-slate-800/90 border border-slate-700/80 rounded text-[9px] font-bold text-white shadow-sm">R</kbd>
+            <span className="text-slate-300 font-medium">Reload</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <kbd className="px-1.5 py-0.5 bg-slate-800/90 border border-slate-700/80 rounded text-[9px] font-bold text-white shadow-sm">Q</kbd>
+            <span className="text-slate-300 font-medium">Switch Weapon</span>
           </div>
         </div>
       </div>
+
+      {/* Near Black Market Gun Store Prompt */}
+      {nearGunShop && !nearDesk && !nearCoworker && (
+        <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20 animate-bounce">
+          <button
+            onClick={() => setIsGunShopOpen(true)}
+            className="flex items-center space-x-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black px-6 py-3 rounded-full shadow-2xl shadow-amber-950/60 border border-amber-400/50 transition cursor-pointer"
+          >
+            <ShoppingBag className="w-4 h-4" />
+            <span>Open Black Market Gun Store (B)</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Desk Sitting Interaction Prompt */}
       {nearDesk && (
@@ -202,6 +315,18 @@ export default function OfficeCanvas({ currentUser, onOpenChat, onStatusChange }
           </button>
         </div>
       )}
+
+      {/* Interactive Black Market Gun Shop Modal */}
+      <GunShopModal
+        isOpen={isGunShopOpen}
+        onClose={() => setIsGunShopOpen(false)}
+        currentWeapon={currentWeapon}
+        playerCash={playerCash}
+        unlockedWeapons={unlockedWeapons}
+        onBuyWeapon={handleBuyWeapon}
+        onEquipWeapon={handleEquipWeapon}
+      />
     </div>
   );
 }
+

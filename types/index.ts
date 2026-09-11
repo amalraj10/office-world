@@ -1,7 +1,25 @@
 export type UserStatus = 'Working' | 'Available' | 'Break' | 'Away' | 'Offline' | 'In a meeting';
 
-export type WeaponType = 'pistol' | 'knife';
+export type WeaponType = 'pistol' | 'shotgun' | 'laser' | 'rocket' | 'knife';
 export type TeamColor = 'red' | 'blue';
+
+export interface WeaponItem {
+  id: WeaponType;
+  name: string;
+  category: 'Pistol' | 'Shotgun' | 'Heavy' | 'Energy' | 'Melee';
+  icon: string;
+  price: number;
+  damage: number;
+  fireRate: string;
+  clipSize: number;
+  reserveAmmo: number;
+  bulletSpeed: number;
+  maxBounces: number;
+  description: string;
+  bulletColor: string;
+  badge: string;
+  unlocked: boolean;
+}
 
 export type HairStyle =
   | 'short-crop'

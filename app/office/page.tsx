@@ -189,18 +189,14 @@ export default function OfficePage() {
         onStatusChange={handleStatusChange}
         onOpenCustomizer={() => setShowCharacterEditor(true)}
         onLogout={handleLogout}
-      />
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left/Center Workspace View */}
-        <main className="flex-1 flex flex-col p-4 overflow-hidden relative">
-          {/* Tab View Switcher */}
+      />      {/* Full-Screen 2D Gaming Arena Main Content Area */}
+      <div className="flex-1 flex overflow-hidden p-2">
+        <main className="flex-1 flex flex-col overflow-hidden relative w-full h-full">
           {activeTab === 'office' && (
             <div className="flex-1 w-full h-full relative">
               <OfficeCanvas
                 currentUser={currentUser}
-                onOpenChat={handleOpenChat}
+                onOpenChat={() => {}}
                 onStatusChange={handleStatusChange}
               />
             </div>
@@ -242,8 +238,6 @@ export default function OfficePage() {
           {activeTab === 'settings' && (
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6 overflow-y-auto max-w-2xl mx-auto w-full space-y-6">
               <h2 className="text-xl font-bold text-white">Settings</h2>
-
-              {/* Character card */}
               <div className="p-5 bg-slate-950 border border-slate-800 rounded-2xl flex items-center gap-4">
                 <CharacterAvatar config={currentUser.character} size={72} variant="full" />
                 <div className="flex-1 min-w-0">
@@ -316,18 +310,6 @@ export default function OfficePage() {
             </div>
           )}
         </main>
-
-        {/* Right Sidebar */}
-        <Sidebar
-          coworkers={coworkers}
-          snaps={snaps}
-          currentUser={currentUser}
-          onOpenChat={handleOpenChat}
-          onCreateSnap={handleCreateSnap}
-          onReactSnap={handleReactSnap}
-          onStatusChange={handleStatusChange}
-          onSeeAllPeople={() => setShowExecutiveModal(true)}
-        />
       </div>
 
       {/* CEO Executive Floor Overview Modal */}
@@ -345,22 +327,6 @@ export default function OfficePage() {
           displayName={currentUser.name}
           onSave={handleSaveCharacter}
           onClose={() => setShowCharacterEditor(false)}
-        />
-      )}
-
-      {/* Floating Proximity Chat Modal */}
-      {activeChatRecipient && (
-        <ChatModal
-          recipient={activeChatRecipient}
-          currentUser={{ id: currentUser.id, name: currentUser.name }}
-          messages={messages.filter(
-            (m) =>
-              (m.sender_id === currentUser.id && m.receiver_id === activeChatRecipient.userId) ||
-              (m.sender_id === activeChatRecipient.userId && m.receiver_id === currentUser.id) ||
-              !m.receiver_id
-          )}
-          onSendMessage={handleSendMessage}
-          onClose={() => setActiveChatRecipient(null)}
         />
       )}
     </div>
